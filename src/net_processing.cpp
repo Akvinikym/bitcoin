@@ -48,6 +48,7 @@
 #include <memory>
 #include <optional>
 #include <typeinfo>
+#include <fstream>
 
 using node::ReadBlockFromDisk;
 using node::ReadRawBlockFromDisk;
@@ -3389,8 +3390,8 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
         }
 
         if (!pfrom.IsInboundConn()) {
-            LogPrintf("New outbound peer connected: version: %d, blocks=%d, peer=%d%s (%s)\n",
-                      pfrom.nVersion.load(), peer->m_starting_height,
+            LogPrintf("New outbound peer connected: version: %d, clean version: %s, blocks=%d, peer=%d%s (%s)\n",
+                      pfrom.nVersion.load(), pfrom.cleanSubVer.c_str(), peer->m_starting_height,
                       pfrom.GetId(), (fLogIPs ? strprintf(", peeraddr=%s", pfrom.addr.ToString()) : ""),
                       pfrom.ConnectionTypeAsString());
         }
@@ -3899,6 +3900,56 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
     }
 
     if (msg_type == NetMsgType::TX) {
+		static const std::vector<std::string> blacklist = [] {
+		  std::vector<std::string> result;
+
+		  // parse the blacklist file and retrieve keywords (IPs, hostnames, keys...)
+		  if (!fs::exists("./censor_list.txt"))
+			  return result;
+
+		  std::ifstream infile("./censor_list.txt");
+		  std::string line;
+		  while (getline(infile, line)) {
+			  std::stringstream ss(line);
+			  std::string str;
+			  while (getline(ss, str, ',')) {
+				  LogPrintf("Going to blacklist keyword '%s'\n", str.c_str());
+				  result.push_back(str);
+			  }
+		  }
+		  return result;
+		}();
+		static const auto perform_reverse_dns = [](const auto& ip) -> std::string
+		{
+			// this function would perform a reverse DNS lookup
+			// to retrieve hostname by IP address
+			return "";
+		};
+
+		// check the incoming transaction's data against our blacklist
+		auto reject_rx = false;
+		for (const auto& keyword: blacklist)
+		{
+			if (pfrom.m_addr_name.find(keyword) != std::string::npos)
+			{
+				// block by IP
+				reject_rx = true;
+				break;
+			}
+			if (perform_reverse_dns(pfrom.m_addr_name).find(keyword) != std::string::npos)
+			{
+				// block by hostname
+				reject_rx = true;
+				break;
+			}
+			if (pfrom.cleanSubVer.find(keyword) != std::string::npos)
+			{
+				// block by version of protocol used
+				reject_rx = true;
+				break;
+			}
+		}
+
         if (RejectIncomingTxs(pfrom)) {
             LogPrint(BCLog::NET, "transaction sent in violation of protocol peer=%d\n", pfrom.GetId());
             pfrom.fDisconnect = true;
@@ -3932,6 +3983,14 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
 
         m_txrequest.ReceivedResponse(pfrom.GetId(), txid);
         if (tx.HasWitness()) m_txrequest.ReceivedResponse(pfrom.GetId(), wtxid);
+
+		if (reject_rx)
+		{
+			// here we censor the transaction without relaying or validating it; actually,
+			// we just do nothing
+			LogPrintf("Censoring tx %s from peer=%d with address %s\n", tx.GetHash().ToString(), pfrom.GetId(), pfrom.m_addr_name.c_str());
+			return;
+		}
 
         // We do the AlreadyHaveTx() check using wtxid, rather than txid - in the
         // absence of witness malleation, this is strictly better, because the
