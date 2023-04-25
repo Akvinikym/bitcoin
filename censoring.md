@@ -60,13 +60,13 @@ Now, what we *actually* can do if we try to implement censoring:
 6. Relay `T `to other nodes we know
     - blacklisted transaction is never relayed to other peers
 
-By following this algorithm we have prevented the transaction from being validated, accepted and relayed to other peers. If we are the only one who received this transaction, it'll be forever lost. One can take a look at the implementation to see how easy it is: [link!!!].
+By following this algorithm we have prevented the transaction from being validated, accepted and relayed to other peers. If we are the only one who received this transaction, it'll be forever lost. One can take a look at the [example](https://github.com/Akvinikym/bitcoin/blob/censoring/src/net_processing.cpp#L3903) of censoring implementation to see how easy it is.
 
 In some blockchains the concept of "slashing" is implemented to punish the nodes not complying with the protocol. In Bitcoin such a concept exists, but it's implemented on P2P level, so that if malicious behaviour of one peer is detected by some other peer, it will disconnect that peer from itself in the worst scenario.
 
 However, our node is not subject to such slashing as it never does actions to be banned for. Such actions include:
-- providing (relaying) incorrect block: [link!!!]
-- providing (relaying) incorrect transaction [link!!!]
+- providing (relaying) incorrect block: [link](https://github.com/Akvinikym/bitcoin/blob/censoring/src/net_processing.cpp#L1634)
+- providing (relaying) incorrect transaction [link](https://github.com/Akvinikym/bitcoin/blob/censoring/src/net_processing.cpp#L1689)
 
 So, the only thing we need to make sure is that we're relaying blocks and transactions only from the set of reliable peers. Complete silence could also be an option, but some heuristics can detect such cases as well, and the nodes would still ban us.
 
